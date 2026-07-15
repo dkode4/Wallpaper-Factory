@@ -47,9 +47,16 @@ Double-click **`Wallpaper Factory.bat`**.
 - **Start processing**: runs the pipeline; progress bar + live log.
   Already-processed images are skipped, so the folder works as an inbox:
   drop new files in `original`, press Start again.
-- **Timings**: *Last image took* and *Current image* show how long each 4K
-  export takes, so a long pack has a visible pace. Both are read from the
-  output folders, so they also track runs started from the command line.
+- **Timings**: *Last image took*, *Current image*, and *Pack time left* show the
+  pace of a long run. The estimate averages the images finished so far in the
+  current run, so it needs one image before it can show anything, and it gets
+  steadier as the run goes. All three are read from the output folders, so they
+  also track runs started from the command line.
+- **Status**: *processing (this app)* means this window started the run;
+  *processing (background run)* means something else is working on this pack
+  (a command-line run announces itself with `.factory.lock`). *Waiting,
+  upscaler busy on another pack* means the GPU is in use elsewhere, so Start is
+  held back rather than have two runs fight over it.
 - **Closing during a run**: you're asked whether to stop it or leave it
   running in the background. A run left running finishes the pack on its own;
   reopen the app and it reattaches to the live log.

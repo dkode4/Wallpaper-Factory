@@ -167,6 +167,12 @@ def apply_theme(root: tk.Tk) -> None:
     style.map("TButton",
               background=[("active", "#f0f1f4"), ("disabled", "#f2f3f5")],
               foreground=[("disabled", "#a3a8ae")])
+    # sits on a white card, so it needs a fill to read as a button at all
+    style.configure("Chip.TButton", background="#e7eaee", bordercolor="#c9ced6",
+                    foreground=INK, padding=(12, 5))
+    style.map("Chip.TButton",
+              background=[("active", "#dbe0e6")],
+              bordercolor=[("active", "#b6bdc7")])
     style.configure("Primary.TButton", background=INK, foreground="#ffffff",
                     bordercolor=INK)
     style.map("Primary.TButton",
@@ -208,6 +214,9 @@ class FactoryApp:
         self._last_done: int | None = None
         self._img_start: float | None = None
         self._last_dur: float | None = None
+        self._durations: list[float] = []      # this run's images, for the ETA
+        self._total = 0
+        self._done = 0
         self._was_running = False
 
         root.title("Wallpaper Factory")
@@ -248,7 +257,8 @@ class FactoryApp:
         self._res_cache: dict[str, tuple[float, int, int]] = {}
         self.res_bad_var = tk.StringVar(value="")
         self.res_ok_var = tk.StringVar(value="")
-        ttk.Button(srow, text="Details", command=self.show_res_details).pack(side="right")
+        ttk.Button(srow, text="Details", style="Chip.TButton",
+                   command=self.show_res_details).pack(side="right")
         tk.Label(srow, textvariable=self.res_bad_var, bg=CARD, fg=BAD,
                  font=(UI, 10, "bold")).pack(side="right", padx=(4, 10))
         tk.Label(srow, textvariable=self.res_ok_var, bg=CARD, fg=OK,
@@ -262,9 +272,12 @@ class FactoryApp:
         kpis.pack(fill="x", pady=(10, 0))
         self.last_var = tk.StringVar(value="—")
         self.elapsed_var = tk.StringVar(value="—")
+        self.eta_var = tk.StringVar(value="—")
         self._kpi(kpis, "LAST IMAGE TOOK", self.last_var, INK).pack(
             side="left", fill="x", expand=True)
         self._kpi(kpis, "CURRENT IMAGE", self.elapsed_var, ACCENT).pack(
+            side="left", fill="x", expand=True, padx=(10, 0))
+        self._kpi(kpis, "PACK TIME LEFT", self.eta_var, INK).pack(
             side="left", fill="x", expand=True, padx=(10, 0))
 
         # -- run controls
@@ -492,12 +505,14 @@ class FactoryApp:
             self._last_done = None
             self._img_start = None
             self._last_dur = None
+            self._durations = []
             self._was_running = False
 
         now = time.monotonic()
         if running and not self._was_running:   # run just started
             self._img_start = now
             self._last_dur = None
+            self._durations = []       # a previous run's pace isn't evidence
         elif not running:
             self._img_start = None
         self._was_running = running
@@ -510,12 +525,28 @@ class FactoryApp:
                 # >1 in a tick (e.g. a burst of skips) averages out rather than
                 # crediting the whole span to one image
                 self._last_dur = (now - self._img_start) / finished
+                self._durations.extend([self._last_dur] * finished)
             self._img_start = now
             self._last_done = done
         elif done < self._last_done:            # outputs deleted underneath us
             self._last_done = done
 
         self.last_var.set(fmt_duration(self._last_dur))
+
+    def eta(self) -> float | None:
+        """Seconds left for the whole pack, or None if not estimable yet.
+
+        Averages the images finished so far this run rather than using the last
+        one, since a single image is a poor predictor. Subtracts the current
+        image's elapsed time so the estimate counts down smoothly instead of
+        stepping only when an image lands."""
+        if self._img_start is None or not self._durations:
+            return None
+        remaining = self._total - self._done
+        if remaining <= 0:
+            return None
+        avg = sum(self._durations) / len(self._durations)
+        return max(0.0, avg * remaining - (time.monotonic() - self._img_start))
 
     def tick_elapsed(self) -> None:
         """Separate from refresh() so the running clock ticks every second
@@ -524,21 +555,37 @@ class FactoryApp:
             self.elapsed_var.set(fmt_duration(time.monotonic() - self._img_start))
         else:
             self.elapsed_var.set("—")
+        left = self.eta()
+        if left is None:
+            # no finished image yet this run, so any number would be invented
+            self.eta_var.set("—" if self._img_start is None else "…")
+        else:
+            self.eta_var.set(fmt_duration(left))
         self.root.after(500, self.tick_elapsed)
 
     def refresh(self) -> None:
         total, done = self.counts()
         own_run = self.proc is not None and self.proc.poll() is None
-        external_run = not own_run and (lock_pid(self.pack_dir()) is not None or upscaler_running())
-        running = own_run or external_run
+        # the lock file is per-pack, so it's the only thing that proves THIS
+        # pack is being worked on
+        pack_run = not own_run and lock_pid(self.pack_dir()) is not None
+        running = own_run or pack_run
+        # the upscaler check is machine-wide: it means the GPU is busy, not that
+        # this pack is being processed. Kept apart, or an idle pack would report
+        # another pack's run as its own.
+        elsewhere = not running and upscaler_running()
+        busy = running or elsewhere
+        self._total, self._done = total, done
         self.progress["maximum"] = max(total, 1)
         self.progress["value"] = done
-        if total and done == total:
+        if total and done == total and not running:
             state, colour = "all done", OK
         elif own_run:
             state, colour = "processing (this app)", ACCENT
-        elif external_run:
+        elif pack_run:
             state, colour = "processing (background run)", ACCENT
+        elif elsewhere:
+            state, colour = "waiting — upscaler busy on another pack", MUTED
         else:
             state, colour = "idle", MUTED
         self.status_var.set(f"{done} / {total} images finished")
@@ -550,12 +597,12 @@ class FactoryApp:
         bad = len(rows) - ok
         self.res_ok_var.set(f"✓ {ok}")
         self.res_bad_var.set(f"✗ {bad}" if bad else "")
-        if running:
-            self.start_btn.configure(state="disabled")
-            self.stop_btn.configure(state="normal")
-        else:
-            self.start_btn.configure(state="normal")
-            self.stop_btn.configure(state="disabled")
+        # Start is gated on the GPU being free at all (two runs would just fight
+        # over it). Stop stays available whenever anything is running so an
+        # orphaned upscaler can still be cleared - stop() confirms first if the
+        # run isn't this pack's.
+        self.start_btn.configure(state="disabled" if busy else "normal")
+        self.stop_btn.configure(state="normal" if busy else "disabled")
         self.root.after(2000, self.refresh)
 
     def poll_log(self) -> None:
@@ -771,6 +818,19 @@ class FactoryApp:
         self.stop_btn.configure(state="disabled")
 
     def stop(self) -> None:
+        own = self.proc is not None and self.proc.poll() is None
+        if not own and lock_pid(self.pack_dir()) is None and upscaler_running():
+            # nothing here to stop, yet the GPU is busy: either another pack's
+            # run or a leftover process. Killing the upscaler is machine-wide,
+            # so never do it to someone else's run without asking.
+            if not messagebox.askyesno(
+                "Upscaler busy elsewhere",
+                "No run is active for this pack, but an upscaler is running on "
+                "this machine — either another pack's run, or a leftover "
+                "process from a crash.\n\nStop it anyway?",
+                icon="warning",
+            ):
+                return
         stopped_something = False
         # kill this app's own run, including its child processes
         if self.proc is not None and self.proc.poll() is None:
