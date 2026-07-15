@@ -40,6 +40,12 @@ Double-click **`Wallpaper Factory.bat`**.
 - **Start processing** — runs the pipeline; progress bar + live log.
   Already-processed images are skipped, so the folder works as an inbox:
   drop new files in `original`, press Start again.
+- **Timings** — *Last image took* and *Current image* show how long each 4K
+  export takes, so a long pack has a visible pace. Both are read from the
+  output folders, so they also track runs started from the command line.
+- **Closing during a run** — you're asked whether to stop it or leave it
+  running in the background. A run left running finishes the pack on its own;
+  reopen the app and it reattaches to the live log.
 - **Resolution check (✓ / ✗ + Details)** — flags any original too small to
   make a sharp 4K export. Rule of thumb: originals need to be at least
   **960 px tall** (Midjourney's upscaled 2944x1648 downloads always pass).
@@ -74,6 +80,22 @@ exact 16:9 4K frame and a centered 9:16 4K frame from the oversized master
 and saves them with Lanczos resampling. A `.factory.lock` file in the pack
 folder (containing the runner's PID) coordinates between the GUI and any
 externally started runs, so the app always shows the true processing state.
+
+Exports are written to a `.part` file and renamed into place, so an interrupted
+run can never leave a half-written wallpaper that later looks finished. An
+image counts as done only when both outputs are complete PNGs, checked by their
+trailing IEND chunk — which also catches files part-copied from another machine.
+
+Each pack holds its own working files, all disposable:
+
+| File | Purpose |
+| --- | --- |
+| `.factory.log` | The current run's output. The app tails it, which is why a run can outlive the window and why CLI runs still show a log. |
+| `.factory.lock` | The running PID, so the app knows a run is active. |
+| `.factory_tmp/` | Scratch for the upscaled master (large). |
+
+Stopping a run deletes its scratch, and every run starts by sweeping anything a
+previous one left behind, so an interrupted run can't accumulate on disk.
 
 ## Files
 
