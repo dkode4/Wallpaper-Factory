@@ -52,21 +52,39 @@ UI = "Segoe UI"
 MONO = "Consolas"
 
 
-def load_last_pack() -> str:
+def load_settings() -> dict:
     try:
-        saved = json.loads(SETTINGS_FILE.read_text())["last_pack"]
-        if Path(saved).is_dir():
-            return saved
-    except (OSError, KeyError, ValueError):
+        data = json.loads(SETTINGS_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(**values) -> None:
+    """Merge keys into the settings file, keeping the rest intact."""
+    data = load_settings()
+    data.update(values)
+    try:
+        SETTINGS_FILE.write_text(json.dumps(data))
+    except OSError:
         pass
+
+
+def load_last_pack() -> str:
+    saved = load_settings().get("last_pack")
+    if isinstance(saved, str) and Path(saved).is_dir():
+        return saved
     return DEFAULT_PACK
 
 
-def save_last_pack(path: str) -> None:
-    try:
-        SETTINGS_FILE.write_text(json.dumps({"last_pack": path}))
-    except OSError:
-        pass
+def load_prior_avg() -> float | None:
+    """Seconds per image from the last run on this machine.
+
+    Kept so the progress bar and estimate have something to work from during the
+    first image, instead of sitting frozen for minutes. Settings are per-machine
+    and not committed, so a faster GPU corrects this on its first run."""
+    avg = load_settings().get("avg_secs")
+    return float(avg) if isinstance(avg, (int, float)) and avg > 0 else None
 IMAGE_EXTS = (".png", ".jpg", ".jpeg")
 UPSCALER_EXE = "realesrgan-ncnn-vulkan.exe"
 LOG_NAME = ".factory.log"     # per-pack, written by the run, tailed by the app
@@ -215,6 +233,7 @@ class FactoryApp:
         self._img_start: float | None = None
         self._last_dur: float | None = None
         self._durations: list[float] = []      # this run's images, for the ETA
+        self._prior_avg = load_prior_avg()     # last run's pace, until this run has its own
         self._total = 0
         self._done = 0
         self._was_running = False
@@ -237,7 +256,7 @@ class FactoryApp:
         top.pack(fill="x", pady=(10, 0))
         ttk.Label(top, text="Pack folder", style="Field.TLabel").pack(side="left")
         self.pack_var = tk.StringVar(value=load_last_pack())
-        self.pack_var.trace_add("write", lambda *_: save_last_pack(self.pack_var.get()))
+        self.pack_var.trace_add("write", lambda *_: save_settings(last_pack=self.pack_var.get()))
         ttk.Entry(top, textvariable=self.pack_var).pack(side="left", fill="x", expand=True, padx=8)
         ttk.Button(top, text="Browse...", command=self.browse).pack(side="left")
 
@@ -526,6 +545,8 @@ class FactoryApp:
                 # crediting the whole span to one image
                 self._last_dur = (now - self._img_start) / finished
                 self._durations.extend([self._last_dur] * finished)
+                # remember the pace so the next run's first image isn't blind
+                save_settings(avg_secs=round(sum(self._durations) / len(self._durations), 1))
             self._img_start = now
             self._last_done = done
         elif done < self._last_done:            # outputs deleted underneath us
@@ -533,20 +554,42 @@ class FactoryApp:
 
         self.last_var.set(fmt_duration(self._last_dur))
 
+    def avg_secs(self) -> float | None:
+        """Best guess at seconds per image: this run's own pace once it has one,
+        otherwise the last run's, so the first image isn't a blind spot."""
+        if self._durations:
+            return sum(self._durations) / len(self._durations)
+        return self._prior_avg
+
     def eta(self) -> float | None:
         """Seconds left for the whole pack, or None if not estimable yet.
 
-        Averages the images finished so far this run rather than using the last
-        one, since a single image is a poor predictor. Subtracts the current
-        image's elapsed time so the estimate counts down smoothly instead of
-        stepping only when an image lands."""
-        if self._img_start is None or not self._durations:
+        Averages the images finished so far rather than using the last one,
+        since a single image is a poor predictor. Subtracts the current image's
+        elapsed time so the estimate counts down smoothly instead of stepping
+        only when an image lands."""
+        avg = self.avg_secs()
+        if self._img_start is None or avg is None:
             return None
         remaining = self._total - self._done
         if remaining <= 0:
             return None
-        avg = sum(self._durations) / len(self._durations)
         return max(0.0, avg * remaining - (time.monotonic() - self._img_start))
+
+    def progress_value(self) -> float:
+        """Images finished, plus how far into the current one we think we are.
+
+        The count alone only moves when a file lands, so a 7-minute image looks
+        frozen. Elapsed/average fills that gap. Capped just below the next whole
+        image: the bar must never imply an image is finished before its files
+        exist, however far past the estimate it runs."""
+        if self._done >= self._total:
+            return float(self._total)
+        avg = self.avg_secs()
+        if self._img_start is None or not avg:
+            return float(self._done)
+        fraction = min((time.monotonic() - self._img_start) / avg, 0.99)
+        return self._done + fraction
 
     def tick_elapsed(self) -> None:
         """Separate from refresh() so the running clock ticks every second
@@ -557,10 +600,13 @@ class FactoryApp:
             self.elapsed_var.set("—")
         left = self.eta()
         if left is None:
-            # no finished image yet this run, so any number would be invented
+            # nothing to estimate from: any number would be invented
             self.eta_var.set("—" if self._img_start is None else "…")
         else:
             self.eta_var.set(fmt_duration(left))
+        # the bar is driven from here, not refresh(), so it creeps every half
+        # second rather than jumping once every two
+        self.progress["value"] = self.progress_value()
         self.root.after(500, self.tick_elapsed)
 
     def refresh(self) -> None:
@@ -577,7 +623,7 @@ class FactoryApp:
         busy = running or elsewhere
         self._total, self._done = total, done
         self.progress["maximum"] = max(total, 1)
-        self.progress["value"] = done
+        # value is set by tick_elapsed, which runs often enough to animate
         if total and done == total and not running:
             state, colour = "all done", OK
         elif own_run:

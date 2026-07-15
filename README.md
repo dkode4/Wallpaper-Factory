@@ -47,11 +47,17 @@ Double-click **`Wallpaper Factory.bat`**.
 - **Start processing**: runs the pipeline; progress bar + live log.
   Already-processed images are skipped, so the folder works as an inbox:
   drop new files in `original`, press Start again.
+- **Progress bar**: advances continuously rather than jumping once per image,
+  by combining the images finished with how far the current one is through the
+  average. It never fills past the last finished image, however long the
+  current one overruns, so it can't imply a file exists before it does.
 - **Timings**: *Last image took*, *Current image*, and *Pack time left* show the
   pace of a long run. The estimate averages the images finished so far in the
-  current run, so it needs one image before it can show anything, and it gets
-  steadier as the run goes. All three are read from the output folders, so they
-  also track runs started from the command line.
+  current run, and gets steadier as the run goes. The pace of the last run is
+  remembered (in `.factory_settings.json`, per machine), so the first image of
+  a run isn't a blind spot; a machine with a faster GPU corrects this on its
+  own first run. All three are read from the output folders, so they also track
+  runs started from the command line.
 - **Status**: *processing (this app)* means this window started the run;
   *processing (background run)* means something else is working on this pack
   (a command-line run announces itself with `.factory.lock`). *Waiting,
