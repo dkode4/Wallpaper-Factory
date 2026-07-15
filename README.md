@@ -40,9 +40,19 @@ Double-click **`Wallpaper Factory.bat`**.
 - **Start processing** — runs the pipeline; progress bar + live log.
   Already-processed images are skipped, so the folder works as an inbox:
   drop new files in `original`, press Start again.
-- **Create collage** — multi-select images, pick a save location, get a
-  2160x2700 portrait strip-collage (product-page / social preview format).
-  Strips are ordered by file name.
+- **Resolution check (✓ / ✗ + Details)** — flags any original too small to
+  make a sharp 4K export. Rule of thumb: originals need to be at least
+  **960 px tall** (Midjourney's upscaled 2944x1648 downloads always pass).
+- **Create collage** — multi-select images, pick a save location. Four modes:
+
+  | Mode | Output |
+  | --- | --- |
+  | Portrait: Strips (1 per row) | 2160x2700, one wide band per image |
+  | Portrait: Split (2 per row) | 2160x2700, two cropped bands per row (needs an even count) |
+  | Portrait: Split full (whole images) | 2 per row, **nothing cropped**; canvas grows with the count |
+  | Landscape: Grid (wide, for banners) | auto grid biased wide, 16:9 cells, for page backgrounds |
+
+  Images are ordered by file name.
 
 ### Command line
 
