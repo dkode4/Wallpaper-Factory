@@ -9,9 +9,9 @@ versions, and builds stacked-strip **preview collages** for product pages.
 
 - Windows 10/11
 - Python 3.10+ with `pip install pillow`
-- Real-ESRGAN portable build (free, ~40 MB) — see setup below
+- Real-ESRGAN portable build (free, ~40 MB). See setup below.
 - Any GPU with Vulkan support (integrated Intel graphics works; a dedicated
-  GPU is just faster — output quality is identical)
+  GPU is just faster, and output quality is identical)
 
 ## Setup
 
@@ -19,14 +19,21 @@ versions, and builds stacked-strip **preview collages** for product pages.
 2. Download `realesrgan-ncnn-vulkan-20220424-windows.zip` from the official
    Real-ESRGAN releases page:
    <https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0>
-3. Extract it so the exe sits at:
+3. Extract it so these four files sit at:
    ```
    tools\realesrgan\realesrgan-ncnn-vulkan.exe
+   tools\realesrgan\vcomp140.dll
    tools\realesrgan\models\realesrgan-x4plus.bin
    tools\realesrgan\models\realesrgan-x4plus.param
    ```
-   (Only the `realesrgan-x4plus` model files are needed; the rest of the zip
-   contents can be deleted.)
+   All four are required. `vcomp140.dll` is not optional: the upscaler cannot
+   start without it, and Windows does not ship it by default. Most machines
+   have a system-wide copy from the Visual C++ redistributable, but on one that
+   doesn't, deleting it gives a "VCOMP140.dll was not found" error instead of a
+   working upscaler.
+
+   Everything else in the zip (the other models, the sample images, the demo
+   video) can be deleted.
 
 ## Usage
 
@@ -34,22 +41,22 @@ versions, and builds stacked-strip **preview collages** for product pages.
 
 Double-click **`Wallpaper Factory.bat`**.
 
-- **Pack folder** — any folder containing an `original` subfolder with your
+- **Pack folder**: any folder containing an `original` subfolder with your
   source images (PNG/JPG, roughly 16:9). Finished files land in `desktop`
   and `mobile` subfolders, created automatically.
-- **Start processing** — runs the pipeline; progress bar + live log.
+- **Start processing**: runs the pipeline; progress bar + live log.
   Already-processed images are skipped, so the folder works as an inbox:
   drop new files in `original`, press Start again.
-- **Timings** — *Last image took* and *Current image* show how long each 4K
+- **Timings**: *Last image took* and *Current image* show how long each 4K
   export takes, so a long pack has a visible pace. Both are read from the
   output folders, so they also track runs started from the command line.
-- **Closing during a run** — you're asked whether to stop it or leave it
+- **Closing during a run**: you're asked whether to stop it or leave it
   running in the background. A run left running finishes the pack on its own;
   reopen the app and it reattaches to the live log.
-- **Resolution check (✓ / ✗ + Details)** — flags any original too small to
+- **Resolution check (✓ / ✗ + Details)**: flags any original too small to
   make a sharp 4K export. Rule of thumb: originals need to be at least
   **960 px tall** (Midjourney's upscaled 2944x1648 downloads always pass).
-- **Create collage** — multi-select images, pick a save location. Four modes:
+- **Create collage**: multi-select images, pick a save location. Four modes:
 
   | Mode | Output |
   | --- | --- |
@@ -84,7 +91,7 @@ externally started runs, so the app always shows the true processing state.
 Exports are written to a `.part` file and renamed into place, so an interrupted
 run can never leave a half-written wallpaper that later looks finished. An
 image counts as done only when both outputs are complete PNGs, checked by their
-trailing IEND chunk — which also catches files part-copied from another machine.
+trailing IEND chunk, which also catches files part-copied from another machine.
 
 Each pack holds its own working files, all disposable:
 
