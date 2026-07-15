@@ -1,0 +1,9 @@
+# Real-ESRGAN binaries: users download these in setup (see README), too big for git
+tools/realesrgan/
+
+__pycache__/
+*.pyc
+
+# local machine state
+*.lock
+.factory_settings.json
